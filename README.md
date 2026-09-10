@@ -125,6 +125,11 @@ d'etre envoyees.
   donnees sont donc dans `docs/cars.json`, recharge avec un parametre anti-cache
   a chaque ouverture, au retour sur l'app (`visibilitychange`) et via le bouton
   « actualiser ». La page ne peut pas afficher un stock perime.
+- **Pages est deploye depuis le workflow de surveillance, pas par un workflow
+  separe.** Un push signe `GITHUB_TOKEN` ne declenche aucun autre workflow
+  (garde-fou anti-boucle de GitHub) : un `pages.yml` declenche sur `push` ne
+  partait donc que sur un push humain, et la page publiee restait figee entre
+  deux interventions manuelles pendant que le robot collectait correctement.
 - **Le cron GitHub n'est pas ponctuel** : 5 a 20 min de retard, runs sautes en
   periode de charge. Detection reelle sous ~30 min.
 - **GitHub desactive les workflows planifies apres 60 jours sans activite humaine**
@@ -162,6 +167,6 @@ scripts/watch.py       recuperation, diff, notifications, generation
 scripts/template.html  gabarit de l'interface
 data/state.json        etat, historique de prix et donnees d'affichage
 data/cars.csv          export courant trie par prix
-docs/index.html        coquille de l'interface (~9 Ko)
+docs/index.html        coquille de l'interface (~12 Ko)
 docs/cars.json         donnees affichees, rechargees sans cache
 ```

@@ -355,7 +355,13 @@ def main():
             rec["last_seen"] = ts
             # Rafraichi a chaque passage : le mode quick peut ainsi regenerer
             # la page complete sans avoir balaye tout le catalogue.
-            rec["d"] = {k: v for k, v in c.items() if k != "id"}
+            # L'API renvoie parfois une fiche amputee (dealer absent, d'ou
+            # ville et concession vides) : on conserve alors ce qu'on savait
+            # deja plutot que de degrader l'affichage.
+            neuf = {k: v for k, v in c.items() if k != "id"}
+            ancien = rec.get("d") or {}
+            rec["d"] = {k: (v if v not in ("", None) else ancien.get(k, v))
+                        for k, v in neuf.items()}
             if c["price"] is not None and old is not None and c["price"] < old - DROP_MIN + 1 and c["price"] < old:
                 if not seeding:
                     drops.append((c, old))
