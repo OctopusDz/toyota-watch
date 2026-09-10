@@ -9,7 +9,7 @@ Objectif : reperer et appeler vite sur les annonces les moins cheres.
 
 | | |
 |---|---|
-| Toutes les 15 min | balayage des 500 moins cheres (5 requetes) -> alerte rapide |
+| Toutes les 15 min | balayage des 500 moins cheres (5 requetes) -> alerte rapide, page regeneree |
 | Toutes les 6 h | balayage complet en cashAsc + cashDesc (2 x 28 requetes) -> page web, baisses de prix, annonces disparues |
 | Notification | ntfy : un tap ouvre directement l'annonce |
 | Interface | `https://<user>.github.io/<repo>/` — recherche, filtres modele / region / prix max / km max / annee min, 5 tris |
@@ -105,6 +105,12 @@ d'etre envoyees.
 
 ## A savoir
 
+- **La page est regeneree a chaque passage, quick compris.** Le mode quick ne
+  balaie que 500 vehicules, mais la page est construite depuis `data/state.json`
+  (qui garde les champs d'affichage de chaque annonce), pas depuis le balayage
+  courant. Sans cela la page serait restee figee 6 h alors que les
+  notifications, elles, partent toutes les 15 min : on pouvait recevoir une
+  alerte et ne pas trouver la voiture sur la page.
 - **Cache** : GitHub Pages sert les fichiers avec `cache-control: max-age=600`,
   et une app ajoutee a l'ecran d'accueil les garde plus longtemps encore. Les
   donnees sont donc dans `docs/cars.json`, recharge avec un parametre anti-cache
@@ -145,7 +151,7 @@ d'etre envoyees.
 ```
 scripts/watch.py       recuperation, diff, notifications, generation
 scripts/template.html  gabarit de l'interface
-data/state.json        etat + historique de prix (commite par la CI)
+data/state.json        etat, historique de prix et donnees d'affichage
 data/cars.csv          export courant trie par prix
 docs/index.html        coquille de l'interface (~9 Ko)
 docs/cars.json         donnees affichees, rechargees sans cache

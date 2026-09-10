@@ -116,8 +116,11 @@ def fetch(max_pages=None, sort_orders=("cashAsc",)):
         if total and len(merged) >= total:
             break
     manque = (total or 0) - len(merged)
-    print(f"total API : {total} | recupere : {len(merged)}"
-          + (f" | MANQUE {manque}" if manque > 0 else " | complet"))
+    if max_pages:                      # balayage partiel voulu : pas un manque
+        print(f"total API : {total} | balayage partiel : {len(merged)}")
+    else:
+        print(f"total API : {total} | recupere : {len(merged)}"
+              + (f" | MANQUE {manque}" if manque > 0 else " | complet"))
     return list(merged.values()), total
 
 
@@ -247,6 +250,25 @@ def pages_url():
 
 # ---------------------------------------------------------------- sorties
 
+def active_cars(state):
+    """Tous les vehicules encore en vente, d'apres l'etat accumule.
+
+    Le mode quick ne voit que les 500 moins cheres : generer la page depuis
+    le seul balayage courant la reduirait a 500 lignes. On part donc de
+    l'etat, en rafraichissant au passage ce que le balayage vient de revoir.
+    """
+    out = []
+    for cid, rec in state["cars"].items():
+        if rec.get("gone_since") or not rec.get("d"):
+            continue
+        out.append({**rec["d"], "id": cid,
+                    "seeded": bool(rec.get("seeded")),
+                    "first": (rec.get("first_seen") or "")[:10],
+                    "min": rec.get("min_price"),
+                    "prev": rec.get("prev_price")})
+    return sorted(out, key=lambda c: (c["price"] is None, c["price"] or 0))
+
+
 def write_csv(cars):
     cols = ["price", "model", "vers", "year", "km", "fuel", "gear", "body",
             "color", "deal", "city", "zip", "reg", "url", "id"]
@@ -257,17 +279,7 @@ def write_csv(cars):
             w.writerow(c)
 
 
-def write_html(cars, state):
-    cars = sorted(cars, key=lambda c: (c["price"] is None, c["price"] or 0))
-    meta = state["cars"]
-    payload = []
-    for c in cars:
-        m = meta.get(c["id"], {})
-        payload.append({**c,
-                        "seeded": bool(m.get("seeded")),
-                        "first": (m.get("first_seen") or "")[:10],
-                        "min": m.get("min_price"),
-                        "prev": m.get("prev_price")})
+def write_html(payload, state):
     # Donnees dans un fichier a part : GitHub Pages sert le HTML avec
     # cache-control max-age=600, et une app ajoutee a l'ecran d'accueil le
     # garde plus longtemps encore. La page recharge cars.json avec un
@@ -290,20 +302,9 @@ def render_only():
     state = load_state()
     if state is None:
         sys.exit("Aucun etat : lancer d'abord un balayage complet.")
-    with open(CSV_PATH, encoding="utf-8-sig") as f:
-        cars = list(csv.DictReader(f))
-    def num(x):
-        if x in (None, ""):
-            return None
-        f = float(x)
-        return int(f) if f.is_integer() else f
-    for c in cars:
-        c["price"] = num(c["price"])
-        c["km"] = num(c["km"])
-        c.setdefault("id", "")
-        c["id"] = c["id"] or c["url"].rsplit("/", 1)[-1]
-    write_html(cars, state)
-    print(f"page regeneree depuis {len(cars)} vehicules locaux")
+    page = active_cars(state)
+    write_html(page, state)
+    print(f"page regeneree depuis {len(page)} vehicules locaux")
 
 
 def main():
@@ -338,6 +339,7 @@ def main():
             known[cid] = {"first_seen": ts, "last_seen": ts,
                           "price": c["price"], "min_price": c["price"],
                           "prev_price": None}
+            known[cid]["d"] = {k: v for k, v in c.items() if k != "id"}
             if seeding:
                 # Amorcage : ces vehicules etaient deja en stock, ils ne sont
                 # pas "nouveaux". Sans ce marqueur toute la page serait badgee.
@@ -347,6 +349,9 @@ def main():
         else:
             old = rec.get("price")
             rec["last_seen"] = ts
+            # Rafraichi a chaque passage : le mode quick peut ainsi regenerer
+            # la page complete sans avoir balaye tout le catalogue.
+            rec["d"] = {k: v for k, v in c.items() if k != "id"}
             if c["price"] is not None and old is not None and c["price"] < old - DROP_MIN + 1 and c["price"] < old:
                 if not seeding:
                     drops.append((c, old))
@@ -385,9 +390,12 @@ def main():
 
     # L'etat est ecrit en dernier : si la generation echoue, le prochain run
     # rejouera le diff au lieu de considerer les nouveautes comme deja vues.
-    if mode == "full":
-        write_csv(cars)
-        write_html(cars, state)
+    # Regenere a chaque passage, quick compris : sinon la page resterait
+    # figee 6 h alors que les notifications, elles, partent toutes les 15 min.
+    page = active_cars(state)
+    write_csv(page)
+    write_html(page, state)
+    print(f"page : {len(page)} vehicules")
     save_state(state)
 
     if seeding:

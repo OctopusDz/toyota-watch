@@ -24,6 +24,13 @@ header{position:sticky;top:0;z-index:10;background:var(--card);
   border-bottom:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom,0));
   padding-top:calc(10px + env(safe-area-inset-top,0))}
 h1{margin:0 0 2px;font-size:16px;font-weight:650;letter-spacing:-.01em}
+.titlerow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+#refresh{flex:none;width:38px;height:38px;border-radius:50%;border:1px solid var(--line);
+  background:var(--bg);color:var(--fg);font-size:19px;line-height:1;cursor:pointer;
+  font-family:inherit;-webkit-appearance:none;appearance:none}
+#refresh:active{background:var(--chip)}
+#refresh.spin{animation:sp .8s linear infinite;color:var(--accent)}
+@keyframes sp{to{transform:rotate(360deg)}}
 .sub{font-size:11.5px;color:var(--dim)}
 .controls{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px}
 .controls .wide{grid-column:1/-1}
@@ -56,8 +63,13 @@ footer{text-align:center;color:var(--dim);font-size:11px;padding:0 20px 30px}
 </head>
 <body>
 <header>
-  <h1>Toyota &amp; Lexus hybrides</h1>
-  <div class="sub" id="sub">Chargement…</div>
+  <div class="titlerow">
+    <div>
+      <h1>Toyota &amp; Lexus hybrides</h1>
+      <div class="sub" id="sub">Chargement…</div>
+    </div>
+    <button id="refresh" aria-label="Actualiser">↻</button>
+  </div>
   <div class="controls">
     <input class="wide" type="search" id="q" placeholder="Rechercher (modèle, ville, concession…)">
     <select id="model"></select>
@@ -81,7 +93,7 @@ footer{text-align:center;color:var(--dim);font-size:11px;padding:0 20px 30px}
       <option value="-year">Année récente</option>
     </select>
   </div>
-  <div class="count"><span id="count"></span><span><span class="reset" id="refresh">actualiser</span> · <span class="reset" id="reset">réinitialiser</span></span></div>
+  <div class="count"><span id="count"></span><span class="reset" id="reset">réinitialiser</span></div>
 </header>
 <main id="list"></main>
 <footer id="foot"></footer>
@@ -172,7 +184,12 @@ $("#reset").addEventListener("click", () => {
 // Le parametre anti-cache est indispensable : GitHub Pages sert les fichiers
 // avec max-age=600, et une app ajoutee a l'ecran d'accueil les garde plus
 // longtemps. Sans lui la page peut afficher un stock vieux de plusieurs heures.
+let loading = false;
 async function load(){
+  if (loading) return;               // evite les rechargements superposes
+  loading = true;
+  $("#refresh").classList.add("spin");
+  const t0 = performance.now();
   $("#sub").textContent = "Actualisation…";
   try {
     const r = await fetch("cars.json?t=" + Date.now(), {cache: "no-store"});
@@ -186,13 +203,17 @@ async function load(){
     const age = mins < 60 ? `il y a ${mins} min`
               : mins < 1440 ? `il y a ${Math.round(mins/60)} h`
               : d.toLocaleString("fr-FR",{dateStyle:"short",timeStyle:"short"});
-    $("#sub").textContent = `${nb(DATA.length)} annonces · relevé ${age}`;
+    const ms = Math.round(performance.now() - t0);
+    $("#sub").textContent = `${nb(DATA.length)} annonces · relevé ${age} · ${ms} ms`;
     $("#foot").textContent =
       "« NOUVEAU » = première apparition dans le suivi (l'API Toyota ne publie pas " +
       "de date de mise en ligne). Prix en vert : sous le seuil d'alerte de " +
       eur(ALERT) + ".";
   } catch (e) {
-    $("#sub").textContent = "Échec du chargement — réessaie";
+    $("#sub").textContent = "Échec du chargement — appuie sur ↻";
+  } finally {
+    loading = false;
+    $("#refresh").classList.remove("spin");
   }
 }
 $("#refresh").addEventListener("click", load);
