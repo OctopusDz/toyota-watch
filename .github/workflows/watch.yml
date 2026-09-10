@@ -1,0 +1,78 @@
+name: Surveillance Toyota occasions
+
+on:
+  schedule:
+    # Toutes les 15 min : balayage rapide des 500 moins cheres (5 requetes).
+    - cron: '*/15 * * * *'
+    # Toutes les 6 h : balayage complet, page web, baisses de prix (28 requetes).
+    - cron: '7 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Mode d'execution"
+        type: choice
+        options: [full, quick]
+        default: full
+
+concurrency:
+  group: watch
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Choisir le mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${{ inputs.mode }}"
+          elif [ "${{ github.event.schedule }}" = "*/15 * * * *" ]; then
+            MODE="quick"
+          else
+            MODE="full"
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Mode retenu : $MODE"
+
+      - name: Surveiller
+        env:
+          NTFY_TOPIC:    ${{ secrets.NTFY_TOPIC }}
+          NTFY_SERVER:   ${{ vars.NTFY_SERVER   || 'https://ntfy.sh' }}
+          ALERT_PRICE:   ${{ vars.ALERT_PRICE   || '20000' }}
+          ALERT_REGIONS: ${{ vars.ALERT_REGIONS || '' }}
+          QUICK_PAGES:   ${{ vars.QUICK_PAGES   || '5' }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ "${{ steps.mode.outputs.mode }}" = "quick" ]; then
+            python3 scripts/watch.py --quick
+          else
+            python3 scripts/watch.py
+          fi
+
+      - name: Publier les changements
+        run: |
+          git config user.name  "toyota-watch[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data docs
+          if git diff --cached --quiet; then
+            echo "Aucun changement."
+            exit 0
+          fi
+          git commit -m "maj: $(date -u '+%Y-%m-%d %H:%M') UTC (${{ steps.mode.outputs.mode }})"
+          # Une autre execution a pu pousser entre-temps.
+          for i in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && \
+            git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "nouvelle tentative $i"; sleep 5
+          done
+          exit 1
