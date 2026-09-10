@@ -69,10 +69,19 @@ jobs:
             exit 0
           fi
           git commit -m "maj: $(date -u '+%Y-%m-%d %H:%M') UTC (${{ steps.mode.outputs.mode }})"
-          # Une autre execution a pu pousser entre-temps.
+
+          # Une autre execution, ou un push manuel, a pu passer entre-temps.
           for i in 1 2 3; do
-            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && \
-            git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            if git pull --rebase --autostash origin "${GITHUB_REF_NAME}"; then
+              git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            else
+              # Conflit sur les fichiers generes : inutile de le resoudre, ils
+              # sont entierement recalcules a chaque passage. On abandonne ce
+              # commit, le prochain run republiera l'etat a jour.
+              git rebase --abort || true
+              echo "conflit sur les donnees generees, on laisse la main au prochain run"
+              exit 0
+            fi
             echo "nouvelle tentative $i"; sleep 5
           done
-          exit 1
+          echo "push impossible apres 3 tentatives"; exit 1
