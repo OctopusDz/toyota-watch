@@ -12,7 +12,7 @@ Objectif : reperer et appeler vite sur les annonces les moins cheres.
 | Toutes les 15 min | balayage des 1 000 moins cheres (10 requetes) -> alerte rapide, page regeneree |
 | Toutes les 6 h | balayage complet en cashAsc + cashDesc (2 x ~50 requetes) -> page web, baisses de prix, annonces disparues |
 | Notification | ntfy : un tap ouvre directement l'annonce |
-| Interface | `https://<user>.github.io/<repo>/` — recherche, filtres modele / region / prix max / km max / annee min, 5 tris |
+| Interface | `https://<user>.github.io/<repo>/` — recherche, filtres modele / region / prix max / km max / annee min et max, 5 tris |
 
 Alerte sonore (priorite max) sous le seuil de prix ; au-dessus, une seule
 notification silencieuse groupee. Tout reste visible sur la page web.

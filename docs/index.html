@@ -101,12 +101,13 @@ footer{text-align:center;color:var(--dim);font-size:11px;padding:0 20px 30px}
       <option>120000</option><option>160000</option>
     </select>
     <select id="minyear"></select>
-    <select id="sort">
+    <select id="maxyear"></select>
+    <select class="wide" id="sort">
       <option value="price">Prix croissant</option>
       <option value="-price">Prix décroissant</option>
-      <option value="km">Km croissant</option>
-      <option value="-first">Vus récemment</option>
-      <option value="-year">Année récente</option>
+      <option value="km">Kilométrage croissant</option>
+      <option value="-first">Vus récemment en premier</option>
+      <option value="-year">Année la plus récente</option>
     </select>
   </div>
   <div class="count"><span id="count"></span><span class="reset" id="reset">réinitialiser</span></div>
@@ -139,8 +140,9 @@ function fillAll(){
     [...new Set(DATA.map(c => c.model))].filter(Boolean).sort());
   fillSelect($("#region"), "Toute la France",
     [...new Set(DATA.map(c => c.reg))].filter(Boolean).sort());
-  fillSelect($("#minyear"), "Année min",
-    [...new Set(DATA.map(c => c.year))].filter(Boolean).sort().reverse());
+  const annees = [...new Set(DATA.map(c => c.year))].filter(Boolean).sort().reverse();
+  fillSelect($("#minyear"), "Année min", annees);
+  fillSelect($("#maxyear"), "Année max", annees);
 }
 
 function render(){
@@ -148,6 +150,7 @@ function render(){
   const model = $("#model").value, region = $("#region").value;
   const maxp = +$("#maxp").value || Infinity, maxk = +$("#maxk").value || Infinity;
   const minyear = +$("#minyear").value || 0;
+  const maxyear = +$("#maxyear").value || 9999;
   const sort = $("#sort").value;
 
   let rows = DATA.filter(c =>
@@ -156,6 +159,7 @@ function render(){
     (c.price ?? Infinity) <= maxp &&
     (c.km ?? Infinity) <= maxk &&
     (+c.year || 0) >= minyear &&
+    (+c.year || 9999) <= maxyear &&
     (!q || `${c.model} ${c.vers} ${c.city} ${c.deal} ${c.reg} ${c.color} ${c.year}`
              .toLowerCase().includes(q)));
 
@@ -192,10 +196,10 @@ function render(){
   }).join("") : `<div class="empty">Aucun véhicule ne correspond.</div>`;
 }
 
-["q","model","region","maxp","maxk","minyear","sort"].forEach(id =>
+["q","model","region","maxp","maxk","minyear","maxyear","sort"].forEach(id =>
   $("#"+id).addEventListener("input", render));
 $("#reset").addEventListener("click", () => {
-  ["q","model","region","maxp","maxk","minyear"].forEach(id => $("#"+id).value = "");
+  ["q","model","region","maxp","maxk","minyear","maxyear"].forEach(id => $("#"+id).value = "");
   $("#sort").value = "price"; render();
 });
 
