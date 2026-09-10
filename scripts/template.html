@@ -57,7 +57,7 @@ footer{text-align:center;color:var(--dim);font-size:11px;padding:0 20px 30px}
 <body>
 <header>
   <h1>Toyota &amp; Lexus hybrides</h1>
-  <div class="sub" id="sub"></div>
+  <div class="sub" id="sub">Chargement…</div>
   <div class="controls">
     <input class="wide" type="search" id="q" placeholder="Rechercher (modèle, ville, concession…)">
     <select id="model"></select>
@@ -81,15 +81,13 @@ footer{text-align:center;color:var(--dim);font-size:11px;padding:0 20px 30px}
       <option value="-year">Année récente</option>
     </select>
   </div>
-  <div class="count"><span id="count"></span><span class="reset" id="reset">réinitialiser</span></div>
+  <div class="count"><span id="count"></span><span><span class="reset" id="refresh">actualiser</span> · <span class="reset" id="reset">réinitialiser</span></span></div>
 </header>
 <main id="list"></main>
 <footer id="foot"></footer>
 
 <script>
-const DATA = __DATA__;
-const UPDATED = "__UPDATED__";
-const ALERT = __ALERT__;
+let DATA = [], UPDATED = "", ALERT = 20000;
 
 const $ = s => document.querySelector(s);
 const nb = n => n == null ? "?" : Math.round(n).toLocaleString("fr-FR");
@@ -101,15 +99,19 @@ const DAY = 864e5, today = Date.now();
 const daysAgo = d => d ? Math.floor((today - Date.parse(d)) / DAY) : 999;
 
 function fillSelect(el, label, values){
+  const keep = el.value;
   el.innerHTML = `<option value="">${label}</option>` +
     values.map(v => `<option>${v}</option>`).join("");
+  if (values.includes(keep)) el.value = keep;
 }
-fillSelect($("#model"), "Tous les modèles",
-  [...new Set(DATA.map(c => c.model))].filter(Boolean).sort());
-fillSelect($("#region"), "Toute la France",
-  [...new Set(DATA.map(c => c.reg))].filter(Boolean).sort());
-fillSelect($("#minyear"), "Année min",
-  [...new Set(DATA.map(c => c.year))].filter(Boolean).sort().reverse());
+function fillAll(){
+  fillSelect($("#model"), "Tous les modèles",
+    [...new Set(DATA.map(c => c.model))].filter(Boolean).sort());
+  fillSelect($("#region"), "Toute la France",
+    [...new Set(DATA.map(c => c.reg))].filter(Boolean).sort());
+  fillSelect($("#minyear"), "Année min",
+    [...new Set(DATA.map(c => c.year))].filter(Boolean).sort().reverse());
+}
 
 function render(){
   const q = $("#q").value.trim().toLowerCase();
@@ -167,12 +169,38 @@ $("#reset").addEventListener("click", () => {
   $("#sort").value = "price"; render();
 });
 
-$("#sub").textContent = `${nb(DATA.length)} annonces · mis à jour ` +
-  new Date(UPDATED).toLocaleString("fr-FR",{dateStyle:"short",timeStyle:"short"});
-$("#foot").textContent =
-  "« NOUVEAU » = première apparition dans le suivi (l'API Toyota ne publie pas de date de mise en ligne). " +
-  "Prix en vert : sous le seuil d'alerte de " + eur(ALERT) + ".";
-render();
+// Le parametre anti-cache est indispensable : GitHub Pages sert les fichiers
+// avec max-age=600, et une app ajoutee a l'ecran d'accueil les garde plus
+// longtemps. Sans lui la page peut afficher un stock vieux de plusieurs heures.
+async function load(){
+  $("#sub").textContent = "Actualisation…";
+  try {
+    const r = await fetch("cars.json?t=" + Date.now(), {cache: "no-store"});
+    if (!r.ok) throw new Error(r.status);
+    const j = await r.json();
+    DATA = j.cars; UPDATED = j.updated; ALERT = j.alert;
+    fillAll();
+    render();
+    const d = new Date(UPDATED);
+    const mins = Math.round((Date.now() - d) / 60000);
+    const age = mins < 60 ? `il y a ${mins} min`
+              : mins < 1440 ? `il y a ${Math.round(mins/60)} h`
+              : d.toLocaleString("fr-FR",{dateStyle:"short",timeStyle:"short"});
+    $("#sub").textContent = `${nb(DATA.length)} annonces · relevé ${age}`;
+    $("#foot").textContent =
+      "« NOUVEAU » = première apparition dans le suivi (l'API Toyota ne publie pas " +
+      "de date de mise en ligne). Prix en vert : sous le seuil d'alerte de " +
+      eur(ALERT) + ".";
+  } catch (e) {
+    $("#sub").textContent = "Échec du chargement — réessaie";
+  }
+}
+$("#refresh").addEventListener("click", load);
+// Retour sur l'app depuis l'ecran d'accueil : on recharge.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) load();
+});
+load();
 </script>
 </body>
 </html>

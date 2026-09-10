@@ -20,6 +20,7 @@ ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_PATH = os.path.join(ROOT, "data", "state.json")
 CSV_PATH   = os.path.join(ROOT, "data", "cars.csv")
 HTML_PATH  = os.path.join(ROOT, "docs", "index.html")
+JSON_PATH  = os.path.join(ROOT, "docs", "cars.json")
 
 API = "https://usc-webcomponents.toyota-europe.com/v1/api/usedcars/results/fr/fr?brand=toyota"
 QUERY = {
@@ -267,12 +268,18 @@ def write_html(cars, state):
                         "first": (m.get("first_seen") or "")[:10],
                         "min": m.get("min_price"),
                         "prev": m.get("prev_price")})
+    # Donnees dans un fichier a part : GitHub Pages sert le HTML avec
+    # cache-control max-age=600, et une app ajoutee a l'ecran d'accueil le
+    # garde plus longtemps encore. La page recharge cars.json avec un
+    # parametre anti-cache, donc elle ne peut pas afficher de stock perime.
+    with open(JSON_PATH, "w", encoding="utf-8") as f:
+        json.dump({"updated": state["last_run"],
+                   "alert": ALERT_PRICE,
+                   "cars": payload}, f, ensure_ascii=False, separators=(",", ":"))
+
     tpl = open(os.path.join(ROOT, "scripts", "template.html"), encoding="utf-8").read()
-    out = (tpl.replace("__DATA__", json.dumps(payload, ensure_ascii=False))
-              .replace("__UPDATED__", html.escape(state["last_run"]))
-              .replace("__ALERT__", str(ALERT_PRICE)))
     with open(HTML_PATH, "w", encoding="utf-8") as f:
-        f.write(out)
+        f.write(tpl)
 
 
 # ---------------------------------------------------------------- main

@@ -105,6 +105,11 @@ d'etre envoyees.
 
 ## A savoir
 
+- **Cache** : GitHub Pages sert les fichiers avec `cache-control: max-age=600`,
+  et une app ajoutee a l'ecran d'accueil les garde plus longtemps encore. Les
+  donnees sont donc dans `docs/cars.json`, recharge avec un parametre anti-cache
+  a chaque ouverture, au retour sur l'app (`visibilitychange`) et via le bouton
+  « actualiser ». La page ne peut pas afficher un stock perime.
 - **Le cron GitHub n'est pas ponctuel** : 5 a 20 min de retard, runs sautes en
   periode de charge. Detection reelle sous ~30 min.
 - **GitHub desactive les workflows planifies apres 60 jours sans activite humaine**
@@ -142,5 +147,6 @@ scripts/watch.py       recuperation, diff, notifications, generation
 scripts/template.html  gabarit de l'interface
 data/state.json        etat + historique de prix (commite par la CI)
 data/cars.csv          export courant trie par prix
-docs/index.html        interface publiee
+docs/index.html        coquille de l'interface (~9 Ko)
+docs/cars.json         donnees affichees, rechargees sans cache
 ```
