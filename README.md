@@ -10,7 +10,7 @@ Objectif : reperer et appeler vite sur les annonces les moins cheres.
 | | |
 |---|---|
 | Toutes les 15 min | balayage des 500 moins cheres (5 requetes) -> alerte rapide |
-| Toutes les 6 h | balayage complet (~2 750 vehicules, 28 requetes) -> page web, baisses de prix, annonces disparues |
+| Toutes les 6 h | balayage complet en cashAsc + cashDesc (2 x 28 requetes) -> page web, baisses de prix, annonces disparues |
 | Notification | ntfy : un tap ouvre directement l'annonce |
 | Interface | `https://<user>.github.io/<repo>/` — recherche, filtres modele / region / prix max / km max / annee min, 5 tris |
 
@@ -110,14 +110,30 @@ d'etre envoyees.
 - **GitHub desactive les workflows planifies apres 60 jours sans activite humaine**
   sur le depot ; les commits du bot ne comptent pas. Un push manuel de temps en
   temps, ou un commit depuis l'interface, suffit a relancer le compteur.
-- **Convergence de l'etat** : un balayage voit 2 730-2 746 vehicules sur 2 747
-  annonces (derive de pagination). Les ids ne sont jamais retires de l'etat :
-  un vehicule manque a un passage n'est donc pas signale « nouveau » au suivant.
-  L'etat converge vers le catalogue complet en deux ou trois balayages.
-- **Doublons de pagination** : les ex aequo de prix se reordonnent entre deux
-  appels et reapparaissent aux frontieres de page. Dedoublonnage par id — ce qui
-  implique que quelques vehicules peuvent etre manques a un balayage donne, sans
-  tri a departage stable cote API. Le balayage suivant les rattrape.
+- **Derive de pagination, et sa correction.** Le tri `cashAsc` repose sur un
+  script Painless sur le prix, sans clef de departage unique. Les ex aequo se
+  reordonnent entre deux requetes et quelques vehicules tombent entre deux
+  pages : un balayage seul rend 2 730 a 2 742 ids sur 2 747.
+
+  Mesure faite sur quatre ordres de tri :
+
+  | balayage | ids |
+  |---|---|
+  | `cashAsc` seul | 2 730 |
+  | union `cashAsc` + `cashDesc` | **2 747** |
+  | + `mileageAsc`, `yearDesc` | +0 |
+
+  Inverser l'ordre place les ex aequo a d'autres positions : l'union des deux
+  atteint exactement le total annonce. Le mode full balaie donc dans les deux
+  sens et s'arrete des que l'union atteint `totalResultCount`.
+
+  Le mode quick garde un seul balayage (la vitesse prime) ; comme aucun id
+  n'est jamais retire de l'etat, un vehicule manque a un passage est rattrape
+  au suivant sans etre signale « nouveau » a tort.
+
+- **Disparitions** : un vehicule doit manquer a **deux** balayages complets
+  consecutifs avant d'etre declare retire (compteur `missed`). Sans ce delai,
+  la derive marquait a tort une douzaine d'annonces comme disparues.
 
 ## Fichiers
 

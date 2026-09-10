@@ -53,20 +53,11 @@ now = lambda: datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 # ---------------------------------------------------------------- API
 
-def fetch(max_pages=None):
-    """Pagine (au plus max_pages pages) en tri cashAsc.
-
-    Dedoublonne : les ex aequo de prix se reordonnent entre deux appels et
-    reapparaissent aux frontieres de page.
-
-    Il n'existe aucun tri par date exploitable. sortOrder=published trie
-    d'abord par nombre de photos, createdAt n'est que departage, et ce champ
-    n'est jamais renvoye dans la reponse. D'ou la detection par diff d'etat.
-    En mode quick on se limite aux N premieres pages : en cashAsc elles
-    couvrent toute la zone sous le seuil d'alerte."""
+def _sweep(sort_order, max_pages=None):
+    """Un balayage pagine dans un ordre de tri donne."""
     cars, offset, total, seen, pages = [], 0, None, set(), 0
     while True:
-        body = dict(QUERY, offset=offset)
+        body = dict(QUERY, offset=offset, sortOrder=sort_order)
         data = None
         for attempt in range(4):
             try:
@@ -79,14 +70,13 @@ def fetch(max_pages=None):
                     data = json.load(r)
                 break
             except Exception as e:
-                print(f"  retry offset={offset} ({e})", file=sys.stderr)
+                print(f"  retry {sort_order} offset={offset} ({e})", file=sys.stderr)
                 time.sleep(2 ** attempt)
         if data is None:
-            raise RuntimeError(f"echec definitif a offset={offset}")
+            raise RuntimeError(f"echec definitif a offset={offset} ({sort_order})")
 
         if total is None:
             total = data.get("totalResultCount") or 0
-            print(f"total annonce par l'API : {total}")
         batch = data.get("results") or []
         for v in batch:
             if v["id"] not in seen:
@@ -99,8 +89,35 @@ def fetch(max_pages=None):
             break
         offset += 100
         time.sleep(0.3)
-    print(f"recupere : {len(cars)} vehicules uniques ({pages} page(s))")
+    print(f"  {sort_order:<9} -> {len(cars):>5} ids ({pages} page(s))")
     return cars, total
+
+
+def fetch(max_pages=None, sort_orders=("cashAsc",)):
+    """Recupere le catalogue, en unissant plusieurs ordres de tri.
+
+    Le tri cashAsc s'appuie sur un script Painless sur le prix, sans clef de
+    departage unique : les ex aequo se reordonnent entre deux requetes et
+    quelques vehicules tombent entre deux pages. Un balayage seul en rend
+    2 730-2 742 sur 2 747. Balayer aussi en cashDesc place ces ex aequo a
+    d'autres positions : mesure faite, l'union des deux atteint exactement
+    le total annonce (mileageAsc et yearDesc n'ajoutent plus rien).
+
+    Il n'existe aucun tri par date exploitable : sortOrder=published trie
+    d'abord par nombre de photos, createdAt n'est que departage et n'est
+    jamais renvoye. D'ou la detection par diff d'etat.
+    """
+    merged, total = {}, None
+    for so in sort_orders:
+        cars, total = _sweep(so, max_pages)
+        for c in cars:
+            merged.setdefault(c["id"], c)
+        if total and len(merged) >= total:
+            break
+    manque = (total or 0) - len(merged)
+    print(f"total API : {total} | recupere : {len(merged)}"
+          + (f" | MANQUE {manque}" if manque > 0 else " | complet"))
+    return list(merged.values()), total
 
 
 def _num(x):
@@ -286,7 +303,8 @@ def main():
     if "--render" in sys.argv:
         return render_only()
     mode = "quick" if "--quick" in sys.argv else "full"
-    raw, total = fetch(QUICK_PAGES if mode == "quick" else None)
+    raw, total = fetch(*( (QUICK_PAGES, ("cashAsc",)) if mode == "quick"
+                          else (None, ("cashAsc", "cashDesc")) ))
     cars = [slim(v) for v in raw]
     by_id = {c["id"]: c for c in cars}
 
@@ -294,7 +312,7 @@ def main():
     seeding = state is None
     if seeding and mode == "quick":
         print("Aucun etat : le mode quick exige un amorcage complet d'abord.")
-        raw, total = fetch(None)
+        raw, total = fetch(None, ("cashAsc", "cashDesc"))
         cars = [slim(v) for v in raw]
         by_id = {c["id"]: c for c in cars}
         mode = "full"
@@ -335,11 +353,17 @@ def main():
     # pages : seul un balayage complet peut conclure a une disparition.
     gone = []
     if mode == "full":
-        gone = [cid for cid in known if cid not in by_id]
-        for cid in gone:
-            known[cid]["gone_since"] = known[cid].get("gone_since") or ts
-        for cid in by_id:
-            known[cid].pop("gone_since", None)
+        # Un vehicule doit manquer a DEUX balayages complets consecutifs avant
+        # d'etre declare retire : un seul absent peut n'etre qu'une derive.
+        for cid, rec in known.items():
+            if cid in by_id:
+                rec.pop("gone_since", None)
+                rec.pop("missed", None)
+                continue
+            rec["missed"] = rec.get("missed", 0) + 1
+            if rec["missed"] >= 2:
+                rec["gone_since"] = rec.get("gone_since") or ts
+                gone.append(cid)
         state["stock"] = len(cars)
         state["last_full"] = ts
 
