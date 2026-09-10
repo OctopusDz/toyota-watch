@@ -103,6 +103,14 @@ def fetch(max_pages=None):
     return cars, total
 
 
+def _num(x):
+    """Les prix arrivent parfois en decimal (ex. 15992.17)."""
+    if x is None:
+        return None
+    f = float(x)
+    return int(f) if f.is_integer() else f
+
+
 def slim(v):
     """Ne garde que ce qui sert a l'affichage et aux alertes."""
     p   = v.get("product") or {}
@@ -115,7 +123,7 @@ def slim(v):
         "vers":  p.get("versionName") or "",
         "year":  p.get("modelYear") or (v.get("history") or {}).get("registrationDate", "")[:4],
         "km":    (v.get("mileage") or {}).get("value"),
-        "price": (v.get("price") or {}).get("sellingPriceInclVAT"),
+        "price": _num((v.get("price") or {}).get("sellingPriceInclVAT")),
         "fuel":  eng.get("displayFuelType") or "",
         "gear":  (p.get("transmission") or {}).get("name") or "",
         "body":  p.get("bodyType") or "",
@@ -165,11 +173,11 @@ def push(title, message, url=None, priority=3, tags=None):
 
 
 def eur(n):
-    return f"{n:,}".replace(",", " ") + " EUR" if n is not None else "?"
+    return f"{round(n):,}".replace(",", " ") + " EUR" if n is not None else "?"
 
 
 def km_fmt(n):
-    return f"{n:,}".replace(",", " ") + " km" if n is not None else "? km"
+    return f"{round(n):,}".replace(",", " ") + " km" if n is not None else "? km"
 
 
 def is_loud(car):
@@ -223,7 +231,7 @@ def pages_url():
 
 def write_csv(cars):
     cols = ["price", "model", "vers", "year", "km", "fuel", "gear", "body",
-            "color", "deal", "city", "zip", "reg", "url"]
+            "color", "deal", "city", "zip", "reg", "url", "id"]
     with open(CSV_PATH, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
@@ -252,7 +260,31 @@ def write_html(cars, state):
 
 # ---------------------------------------------------------------- main
 
+def render_only():
+    """Regenere docs/index.html depuis les donnees locales, sans appel API.
+    Sert a iterer sur scripts/template.html."""
+    state = load_state()
+    if state is None:
+        sys.exit("Aucun etat : lancer d'abord un balayage complet.")
+    with open(CSV_PATH, encoding="utf-8-sig") as f:
+        cars = list(csv.DictReader(f))
+    def num(x):
+        if x in (None, ""):
+            return None
+        f = float(x)
+        return int(f) if f.is_integer() else f
+    for c in cars:
+        c["price"] = num(c["price"])
+        c["km"] = num(c["km"])
+        c.setdefault("id", "")
+        c["id"] = c["id"] or c["url"].rsplit("/", 1)[-1]
+    write_html(cars, state)
+    print(f"page regeneree depuis {len(cars)} vehicules locaux")
+
+
 def main():
+    if "--render" in sys.argv:
+        return render_only()
     mode = "quick" if "--quick" in sys.argv else "full"
     raw, total = fetch(QUICK_PAGES if mode == "quick" else None)
     cars = [slim(v) for v in raw]

@@ -12,7 +12,7 @@ Objectif : reperer et appeler vite sur les annonces les moins cheres.
 | Toutes les 15 min | balayage des 500 moins cheres (5 requetes) -> alerte rapide |
 | Toutes les 6 h | balayage complet (~2 750 vehicules, 28 requetes) -> page web, baisses de prix, annonces disparues |
 | Notification | ntfy : un tap ouvre directement l'annonce |
-| Interface | `https://<user>.github.io/<repo>/` — tri et filtres, tout le stock |
+| Interface | `https://<user>.github.io/<repo>/` — recherche, filtres modele / region / prix max / km max / annee min, 5 tris |
 
 Alerte sonore (priorite max) sous le seuil de prix ; au-dessus, une seule
 notification silencieuse groupee. Tout reste visible sur la page web.
@@ -96,6 +96,7 @@ filtre km sont donc faits sur la page.
 ```bash
 python3 scripts/watch.py           # balayage complet
 python3 scripts/watch.py --quick   # 500 moins cheres
+python3 scripts/watch.py --render  # regenere la page seule, sans appel API
 NTFY_TOPIC=xxx ALERT_PRICE=22000 python3 scripts/watch.py
 ```
 
@@ -109,6 +110,10 @@ d'etre envoyees.
 - **GitHub desactive les workflows planifies apres 60 jours sans activite humaine**
   sur le depot ; les commits du bot ne comptent pas. Un push manuel de temps en
   temps, ou un commit depuis l'interface, suffit a relancer le compteur.
+- **Convergence de l'etat** : un balayage voit 2 730-2 746 vehicules sur 2 747
+  annonces (derive de pagination). Les ids ne sont jamais retires de l'etat :
+  un vehicule manque a un passage n'est donc pas signale « nouveau » au suivant.
+  L'etat converge vers le catalogue complet en deux ou trois balayages.
 - **Doublons de pagination** : les ex aequo de prix se reordonnent entre deux
   appels et reapparaissent aux frontieres de page. Dedoublonnage par id — ce qui
   implique que quelques vehicules peuvent etre manques a un balayage donne, sans
