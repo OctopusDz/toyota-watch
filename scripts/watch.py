@@ -29,7 +29,8 @@ QUERY = {
         {"filterId": "usedCarBrand", "valueIds": ["38", "22"]},
         {"filterId": "usedCarModel", "valueIds": [
             "AU", "xTY_AUTS", "CM", "CO", "CR", "xTY_CTS", "CTS", "CT",
-            "IS", "LB", "NX", "RA", "RE", "RX", "CH", "CB", "UX"]},
+            "IS", "LB", "NX", "RA", "RE", "RX", "CH", "CB", "UX",
+            "YB"]},   # YB = Yaris Cross
         {"filterId": "usedCarFuelType", "valueIds": ["5"]},
     ],
     "filterContext": "used",
@@ -46,7 +47,7 @@ NTFY_TOPIC   = os.environ.get("NTFY_TOPIC", "")
 ALERT_PRICE  = int(os.environ.get("ALERT_PRICE", "20000"))
 DROP_MIN     = int(os.environ.get("DROP_MIN", "500"))   # baisse mini pour notifier
 MAX_LOUD     = int(os.environ.get("MAX_LOUD", "10"))    # anti-spam par run
-QUICK_PAGES  = int(os.environ.get("QUICK_PAGES", "5"))  # 500 moins cheres
+QUICK_PAGES  = int(os.environ.get("QUICK_PAGES", "10")) # 1000 moins cheres
 REGIONS      = [r.strip().lower() for r in os.environ.get("ALERT_REGIONS", "").split(",") if r.strip()]
 
 now = lambda: datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -310,6 +311,9 @@ def render_only():
 def main():
     if "--render" in sys.argv:
         return render_only()
+    # --seed : absorbe les inconnues sans notifier. A utiliser apres avoir
+    # elargi la liste des modeles, sinon tout le nouveau parc part en alerte.
+    seed_new = "--seed" in sys.argv
     mode = "quick" if "--quick" in sys.argv else "full"
     raw, total = fetch(*( (QUICK_PAGES, ("cashAsc",)) if mode == "quick"
                           else (None, ("cashAsc", "cashDesc")) ))
@@ -340,11 +344,11 @@ def main():
                           "price": c["price"], "min_price": c["price"],
                           "prev_price": None}
             known[cid]["d"] = {k: v for k, v in c.items() if k != "id"}
-            if seeding:
+            if seeding or seed_new:
                 # Amorcage : ces vehicules etaient deja en stock, ils ne sont
                 # pas "nouveaux". Sans ce marqueur toute la page serait badgee.
                 known[cid]["seeded"] = True
-            if not seeding:
+            else:
                 new_cars.append(c)
         else:
             old = rec.get("price")

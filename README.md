@@ -9,8 +9,8 @@ Objectif : reperer et appeler vite sur les annonces les moins cheres.
 
 | | |
 |---|---|
-| Toutes les 15 min | balayage des 500 moins cheres (5 requetes) -> alerte rapide, page regeneree |
-| Toutes les 6 h | balayage complet en cashAsc + cashDesc (2 x 28 requetes) -> page web, baisses de prix, annonces disparues |
+| Toutes les 15 min | balayage des 1 000 moins cheres (10 requetes) -> alerte rapide, page regeneree |
+| Toutes les 6 h | balayage complet en cashAsc + cashDesc (2 x ~50 requetes) -> page web, baisses de prix, annonces disparues |
 | Notification | ntfy : un tap ouvre directement l'annonce |
 | Interface | `https://<user>.github.io/<repo>/` — recherche, filtres modele / region / prix max / km max / annee min, 5 tris |
 
@@ -80,11 +80,20 @@ Repo → *Settings* → *Secrets and variables* → *Actions* → onglet **Varia
 |---|---|---|
 | `ALERT_PRICE` | `20000` | seuil de l'alerte sonore (EUR) |
 | `ALERT_REGIONS` | vide | limite l'alerte sonore a certaines regions, ex. `bretagne,pays-de-la-loire` (la page reste nationale) |
-| `QUICK_PAGES` | `5` | pages balayees en mode rapide (5 = 500 moins cheres) |
+| `QUICK_PAGES` | `10` | pages balayees en mode rapide (10 = 1 000 moins cheres). A garder assez large pour couvrir `ALERT_PRICE` avec de la marge : la 1 000e voiture est a ~22 500 EUR, soit 2 500 EUR au-dessus du seuil. |
 | `NTFY_SERVER` | `https://ntfy.sh` | serveur ntfy auto-heberge le cas echeant |
 
-Reperes sur le stock actuel : sous 18 000 EUR = 4 % du parc, sous 20 000 = 10 %,
-sous 25 000 = 33 %. Prix median 28 190 EUR.
+Reperes sur le parc actuel (4 991 vehicules) : 360 sous 20 000 EUR (7 %), la
+moins chere a 12 990 EUR.
+
+Modeles suivis : les 17 d'origine plus `YB` (Yaris Cross, 2 213 vehicules,
+a partir de 17 390 EUR). Le Yaris `YA` (1 852 vehicules des 11 990 EUR) et
+l'Aygo X `AX` restent volontairement hors surveillance. Les modeles Lexus
+absents de la liste (GS, L5, LM, RC, RZ) n'ont aucun hybride en stock.
+
+Apres tout elargissement de la liste des modeles, lancer une fois
+`python3 scripts/watch.py --seed` : les vehicules inconnus sont absorbes sans
+notification. Sans cela, tout le parc ajoute part en alerte d'un coup.
 
 Le kilometrage ne merite pas de filtre : mediane 32 650 km, maximum 187 495 km,
 **zero** vehicule au-dela de 200 000 km. L'API ne sait de toute facon pas filtrer

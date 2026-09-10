@@ -50,7 +50,7 @@ jobs:
           NTFY_SERVER:   ${{ vars.NTFY_SERVER   || 'https://ntfy.sh' }}
           ALERT_PRICE:   ${{ vars.ALERT_PRICE   || '20000' }}
           ALERT_REGIONS: ${{ vars.ALERT_REGIONS || '' }}
-          QUICK_PAGES:   ${{ vars.QUICK_PAGES   || '5' }}
+          QUICK_PAGES:   ${{ vars.QUICK_PAGES   || '10' }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           if [ "${{ steps.mode.outputs.mode }}" = "quick" ]; then
