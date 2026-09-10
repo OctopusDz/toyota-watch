@@ -37,6 +37,12 @@ h1{margin:0 0 2px;font-size:16px;font-weight:650;letter-spacing:-.01em}
 #pull{height:0;overflow:hidden;text-align:center;color:var(--dim);font-size:12px;
   transition:height .15s}
 #pull.on{height:26px;line-height:26px}
+#toast{max-height:0;overflow:hidden;transition:max-height .2s;text-align:center;
+  font-size:13px;font-weight:600}
+#toast.on{max-height:40px}
+#toast span{display:inline-block;margin:8px 12px 0;padding:6px 13px;border-radius:16px;
+  background:var(--chip);color:var(--dim)}
+#toast span.hit{background:var(--goodbg);color:var(--good)}
 .sub{font-size:11.5px;color:var(--dim)}
 .controls{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px}
 .controls .wide{grid-column:1/-1}
@@ -102,6 +108,7 @@ footer{text-align:center;color:var(--dim);font-size:11px;padding:0 20px 30px}
   <div class="count"><span id="count"></span><span class="reset" id="reset">réinitialiser</span></div>
 </header>
 <div id="pull">Relâche pour actualiser</div>
+<div id="toast"></div>
 <main id="list"></main>
 <footer id="foot"></footer>
 
@@ -191,6 +198,15 @@ $("#reset").addEventListener("click", () => {
 // Le parametre anti-cache est indispensable : GitHub Pages sert les fichiers
 // avec max-age=600, et une app ajoutee a l'ecran d'accueil les garde plus
 // longtemps. Sans lui la page peut afficher un stock vieux de plusieurs heures.
+let toastTimer = null;
+function toast(msg, hit){
+  const el = $("#toast");
+  el.innerHTML = `<span class="${hit ? "hit" : ""}">${msg}</span>`;
+  el.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("on"), 4000);
+}
+
 let loading = false;
 async function load(force){
   if (loading) return;               // evite les rechargements superposes
@@ -203,9 +219,26 @@ async function load(force){
     const r = await fetch("cars.json?t=" + Date.now(), {cache: "no-store"});
     if (!r.ok) throw new Error(r.status);
     const j = await r.json();
+    const before = new Set(DATA.map(c => c.id));
+    const prevPrices = new Map(DATA.map(c => [c.id, c.price]));
     DATA = j.cars; UPDATED = j.updated; ALERT = j.alert;
     fillAll();
     render();
+
+    // Sans retour explicite, un rafraichissement sans nouveaute est
+    // indiscernable d'un bouton casse : on annonce toujours le resultat.
+    if (before.size) {
+      const ajouts = DATA.filter(c => !before.has(c.id));
+      const baisses = DATA.filter(c => prevPrices.has(c.id) && c.price < prevPrices.get(c.id));
+      if (ajouts.length || baisses.length) {
+        const bouts = [];
+        if (ajouts.length) bouts.push(`${ajouts.length} nouvelle${ajouts.length > 1 ? "s" : ""}`);
+        if (baisses.length) bouts.push(`${baisses.length} baisse${baisses.length > 1 ? "s" : ""} de prix`);
+        toast("✓ " + bouts.join(" · "), true);
+      } else {
+        toast("✓ À jour — rien de nouveau");
+      }
+    }
     const d = new Date(UPDATED);
     const mins = Math.round((Date.now() - d) / 60000);
     const age = mins < 60 ? `il y a ${mins} min`
@@ -225,6 +258,10 @@ async function load(force){
   } catch (e) {
     $("#sub").textContent = "Échec du chargement — appuie sur ↻";
   } finally {
+    // Le telechargement prend ~150 ms : sans plancher, l'animation est trop
+    // breve pour etre percue et l'appui semble sans effet.
+    const reste = 500 - (performance.now() - t0);
+    if (reste > 0) await new Promise(r => setTimeout(r, reste));
     loading = false;
     $("#refresh").classList.remove("busy");
   }
