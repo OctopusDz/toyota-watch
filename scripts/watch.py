@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """
-Surveillance des Toyota/Lexus hybrides d'occasion (toyota.fr).
+Surveillance des Toyota/Lexus hybrides d'occasion, cinq pays.
 
-L'API ne fournit aucune date de mise en ligne : une annonce est "nouvelle"
-uniquement si son id est absent de data/state.json. L'etat versionne dans git
-est donc le mecanisme de detection, pas un simple cache.
+Deux plateformes :
+  - Toyota Europe (usc-webcomponents.toyota-europe.com) : FR, BE, DE, ES.
+    Meme API, un code distributeur et un format d'URL de fiche par pays.
+  - Louwman (occasions.toyota.nl) : NL. API .NET distincte, entierement
+    differente, avec un vrai tri par date.
+
+Aucune des deux ne sert de mecanisme fiable de "nouveaute" : une annonce est
+nouvelle uniquement si sa clef "PAYS:id" est absente de data/state.json.
+L'etat versionne dans git est donc le mecanisme de detection.
 
 Sorties :
-  data/state.json  etat + historique de prix (commite par la CI)
+  data/state.json  etat, historique de prix, donnees d'affichage
   data/cars.csv    export courant trie par prix
+  docs/cars.json   donnees de la page, rechargees sans cache
   docs/index.html  interface mobile (GitHub Pages)
   notifications ntfy pour les nouveautes et les baisses de prix
 """
@@ -22,61 +29,83 @@ CSV_PATH   = os.path.join(ROOT, "data", "cars.csv")
 HTML_PATH  = os.path.join(ROOT, "docs", "index.html")
 JSON_PATH  = os.path.join(ROOT, "docs", "cars.json")
 
-API = "https://usc-webcomponents.toyota-europe.com/v1/api/usedcars/results/fr/fr?brand=toyota"
-QUERY = {
-    "uscEnv": "production",
-    "filters": [
-        {"filterId": "usedCarBrand", "valueIds": ["38", "22"]},
-        {"filterId": "usedCarModel", "valueIds": [
-            "AU", "xTY_AUTS", "CM", "CO", "CR", "xTY_CTS", "CTS", "CT",
-            "IS", "LB", "NX", "RA", "RE", "RX", "CH", "CB", "UX",
-            "YB"]},   # YB = Yaris Cross
-        {"filterId": "usedCarFuelType", "valueIds": ["5"]},
-    ],
-    "filterContext": "used",
-    "offset": 0,
-    "resultCount": 100,
-    "sortOrder": "cashAsc",
-    "distributorCode": "94102",
-    "enableExperimentalTotalCountQuery": True,
+# Liste francaise d'origine, alignee sur tous les pays Toyota Europe.
+# Yaris (YA) volontairement absent ; YB = Yaris Cross.
+TME_MODELS = ["AU", "xTY_AUTS", "CM", "CO", "CR", "xTY_CTS", "CTS", "CT",
+              "IS", "LB", "NX", "RA", "RE", "RX", "CH", "CB", "UX", "YB"]
+
+# Meme liste, dans le vocabulaire de l'API Louwman (facette Model, en clair).
+# Pas de Lexus sur occasions.toyota.nl (site separe).
+NL_MODELS = ["auris", "camry", "corolla", "corolla cross", "c-hr", "rav4",
+             "yaris cross"]
+
+SOURCES = {
+    "FR": {"kind": "tme", "flag": "\U0001F1EB\U0001F1F7", "cc": "fr", "lang": "fr",
+           "dist": "94102", "brands": ["38", "22"], "extra": [],
+           "detail": "https://www.toyota.fr/occasions/voiture/{id}"},
+    "BE": {"kind": "tme", "flag": "\U0001F1E7\U0001F1EA", "cc": "be", "lang": "fr",
+           "dist": "94031", "brands": ["38", "22"], "extra": [],
+           "detail": "https://fr.toyota.be/occasions/pdp.{id}"},
+    "DE": {"kind": "tme", "flag": "\U0001F1E9\U0001F1EA", "cc": "de", "lang": "de",
+           "dist": "94272", "brands": ["38", "22"],
+           # Filtres propres a l'Allemagne, tels que configures sur le site :
+           # 2016-2025 et vehicules certifies Toyota ("warranty any" est la
+           # case "Afficher uniquement les vehicules d'occasion certifies").
+           "extra": [{"filterId": "usedCarYear", "min": 2016, "max": 2025},
+                     {"filterId": "usedCarWarranty", "valueIds": ["any"]}],
+           "detail": "https://www.toyota.de/gebrauchtwagen/pdp.{id}"},
+    "ES": {"kind": "tme", "flag": "\U0001F1EA\U0001F1F8", "cc": "es", "lang": "es",
+           "dist": "94244", "brands": ["38", "22"], "extra": [],
+           "detail": "https://www.toyota.es/coches-segunda-mano/ficha/{id}"},
+    "NL": {"kind": "louwman", "flag": "\U0001F1F3\U0001F1F1",
+           "detail": "https://occasions.toyota.nl/auto/{id}"},
 }
 
-DETAIL_URL   = "https://www.toyota.fr/occasions/voiture/{}"
 NTFY_SERVER  = os.environ.get("NTFY_SERVER", "https://ntfy.sh")
 NTFY_TOPIC   = os.environ.get("NTFY_TOPIC", "")
 ALERT_PRICE  = int(os.environ.get("ALERT_PRICE", "20000"))
 DROP_MIN     = int(os.environ.get("DROP_MIN", "500"))   # baisse mini pour notifier
 MAX_LOUD     = int(os.environ.get("MAX_LOUD", "10"))    # anti-spam par run
-QUICK_PAGES  = int(os.environ.get("QUICK_PAGES", "10")) # 1000 moins cheres
+QUICK_PAGES  = int(os.environ.get("QUICK_PAGES", "10")) # 1000 moins cheres / pays
 REGIONS      = [r.strip().lower() for r in os.environ.get("ALERT_REGIONS", "").split(",") if r.strip()]
+# Pays surveilles ; vide = tous. Ex. "FR,BE" pour se limiter.
+COUNTRIES    = [c.strip().upper() for c in os.environ.get("COUNTRIES", "").split(",") if c.strip()] or list(SOURCES)
 
 now = lambda: datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
 # ---------------------------------------------------------------- API
 
-def _sweep(sort_order, max_pages=None):
-    """Un balayage pagine dans un ordre de tri donne."""
+def _post(url, body, label):
+    data = None
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(
+                url, data=json.dumps(body).encode(),
+                headers={"Content-Type": "application/json",
+                         "Accept": "application/json",
+                         "User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.load(r)
+        except Exception as e:
+            print(f"  retry {label} ({e})", file=sys.stderr)
+            time.sleep(2 ** attempt)
+    raise RuntimeError(f"echec definitif : {label}")
+
+
+def _sweep_tme(src, sort_order, max_pages=None):
+    """Un balayage pagine de l'API Toyota Europe, pour un pays."""
+    url = (f"https://usc-webcomponents.toyota-europe.com/v1/api/usedcars/"
+           f"results/{src['cc']}/{src['lang']}?brand=toyota")
+    filters = [{"filterId": "usedCarBrand", "valueIds": src["brands"]},
+               {"filterId": "usedCarModel", "valueIds": TME_MODELS},
+               {"filterId": "usedCarFuelType", "valueIds": ["5"]}] + src["extra"]
     cars, offset, total, seen, pages = [], 0, None, set(), 0
     while True:
-        body = dict(QUERY, offset=offset, sortOrder=sort_order)
-        data = None
-        for attempt in range(4):
-            try:
-                req = urllib.request.Request(
-                    API, data=json.dumps(body).encode(),
-                    headers={"Content-Type": "application/json",
-                             "Accept": "application/json",
-                             "User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req, timeout=60) as r:
-                    data = json.load(r)
-                break
-            except Exception as e:
-                print(f"  retry {sort_order} offset={offset} ({e})", file=sys.stderr)
-                time.sleep(2 ** attempt)
-        if data is None:
-            raise RuntimeError(f"echec definitif a offset={offset} ({sort_order})")
-
+        body = {"uscEnv": "production", "filters": filters, "filterContext": "used",
+                "offset": offset, "resultCount": 100, "sortOrder": sort_order,
+                "distributorCode": src["dist"], "enableExperimentalTotalCountQuery": True}
+        data = _post(url, body, f"{src['cc']} {sort_order} offset={offset}")
         if total is None:
             total = data.get("totalResultCount") or 0
         batch = data.get("results") or []
@@ -91,37 +120,80 @@ def _sweep(sort_order, max_pages=None):
             break
         offset += 100
         time.sleep(0.3)
-    print(f"  {sort_order:<9} -> {len(cars):>5} ids ({pages} page(s))")
+    print(f"    {sort_order:<9} -> {len(cars):>5} ids ({pages} page(s))")
     return cars, total
 
 
-def fetch(max_pages=None, sort_orders=("cashAsc",)):
-    """Recupere le catalogue, en unissant plusieurs ordres de tri.
+def _sweep_nl(src, sort_order, max_pages=None):
+    """Un balayage pagine de l'API Louwman (occasions.toyota.nl).
 
-    Le tri cashAsc s'appuie sur un script Painless sur le prix, sans clef de
-    departage unique : les ex aequo se reordonnent entre deux requetes et
-    quelques vehicules tombent entre deux pages. Un balayage seul en rend
-    2 730-2 742 sur 2 747. Balayer aussi en cashDesc place ces ex aequo a
-    d'autres positions : mesure faite, l'union des deux atteint exactement
-    le total annonce (mileageAsc et yearDesc n'ajoutent plus rien).
-
-    Il n'existe aucun tri par date exploitable : sortOrder=published trie
-    d'abord par nombre de photos, createdAt n'est que departage et n'est
-    jamais renvoye. D'ou la detection par diff d'etat.
+    POST /api/search?source=toyota avec {filter:[{name,values}], limits:{start,
+    limit}, sort}. Le serveur dedoublonne apres decoupage : une page de 100
+    en rend ~80, et "count" est gonfle d'autant. On avance donc de "limit"
+    a chaque page, jamais du nombre recu, et on s'arrete sur page vide.
     """
+    url = "https://occasions.toyota.nl/api/search?source=toyota"
+    filters = [{"name": "FuelType", "values": ["hybride"]},
+               {"name": "Brand", "values": ["toyota"]},
+               {"name": "Model", "values": NL_MODELS}]
+    cars, start, total, seen, pages = [], 0, None, set(), 0
+    while True:
+        body = {"filter": filters, "limits": {"start": start, "limit": 100},
+                "sort": sort_order}
+        data = _post(url, body, f"nl {sort_order} start={start}")
+        if total is None:
+            total = data.get("count") or 0
+        batch = data.get("occasions") or []
+        for v in batch:
+            if v["id"] not in seen:
+                seen.add(v["id"])
+                cars.append(v)
+        pages += 1
+        if not batch or start + 100 >= total:
+            break
+        if max_pages and pages >= max_pages:
+            break
+        start += 100
+        time.sleep(0.3)
+    print(f"    {sort_order:<9} -> {len(cars):>5} ids ({pages} page(s))")
+    return cars, total
+
+
+SORTS = {"tme":     {"asc": "cashAsc",  "desc": "cashDesc"},
+         "louwman": {"asc": "PriceAsc", "desc": "PriceDesc"}}
+
+
+def fetch(code, max_pages=None, both=False):
+    """Recupere le catalogue d'un pays, en unissant deux ordres de tri.
+
+    Ni Toyota Europe ni Louwman n'ont de clef de departage unique : les
+    ex aequo de prix se reordonnent entre deux requetes et quelques vehicules
+    tombent entre deux pages. Balayer aussi en ordre inverse les place
+    ailleurs : mesure faite, l'union des deux converge (FR 2747/2747,
+    NL 3803 -- un troisieme tri n'ajoute plus rien).
+
+    Il n'existe aucun tri par date exploitable cote Toyota Europe :
+    sortOrder=published trie d'abord par nombre de photos, et createdAt
+    n'est jamais renvoye. D'ou la detection par diff d'etat.
+    """
+    src = SOURCES[code]
+    sweep = _sweep_tme if src["kind"] == "tme" else _sweep_nl
+    names = SORTS[src["kind"]]
+    orders = [names["asc"], names["desc"]] if both else [names["asc"]]
+    print(f"  {src['flag']} {code}")
     merged, total = {}, None
-    for so in sort_orders:
-        cars, total = _sweep(so, max_pages)
+    for so in orders:
+        cars, total = sweep(src, so, max_pages)
         for c in cars:
             merged.setdefault(c["id"], c)
         if total and len(merged) >= total:
             break
-    manque = (total or 0) - len(merged)
-    if max_pages:                      # balayage partiel voulu : pas un manque
-        print(f"total API : {total} | balayage partiel : {len(merged)}")
+    if max_pages:
+        print(f"    total API : {total} | balayage partiel : {len(merged)}")
     else:
-        print(f"total API : {total} | recupere : {len(merged)}"
-              + (f" | MANQUE {manque}" if manque > 0 else " | complet"))
+        manque = (total or 0) - len(merged)
+        print(f"    total API : {total} | recupere : {len(merged)}"
+              + (f" | manque {manque}" if manque > 0 else " | complet"))
     return list(merged.values()), total
 
 
@@ -133,7 +205,7 @@ def _num(x):
     return int(f) if f.is_integer() else f
 
 
-def slim(v):
+def slim_tme(v, code):
     """Ne garde que ce qui sert a l'affichage et aux alertes."""
     p   = v.get("product") or {}
     eng = p.get("engine") or {}
@@ -141,6 +213,7 @@ def slim(v):
     adr = dlr.get("address") or {}
     return {
         "id":    v["id"],
+        "cc":    code,
         "model": (p.get("model") or {}).get("description") or v.get("title") or "",
         "vers":  p.get("versionName") or "",
         "year":  p.get("modelYear") or (v.get("history") or {}).get("registrationDate", "")[:4],
@@ -155,8 +228,40 @@ def slim(v):
         "zip":   adr.get("zip") or "",
         "reg":   adr.get("region") or "",
         "phone": dlr.get("primaryPhone") or dlr.get("phone") or "",
-        "url":   DETAIL_URL.format(v["id"]),
+        "url":   SOURCES[code]["detail"].format(id=v["id"]),
     }
+
+
+def slim_nl(v):
+    dlr = v.get("dealer") or {}
+    return {
+        "id":    str(v["id"]),
+        "cc":    "NL",
+        "model": f"{v.get('brand') or ''} {v.get('model') or ''}".strip(),
+        "vers":  v.get("type") or "",
+        "year":  str(v.get("year") or ""),
+        "km":    v.get("mileage"),
+        "price": _num(v.get("price")),
+        "fuel":  v.get("fuelType") or "",
+        "gear":  v.get("transmission") or "",
+        "body":  v.get("body") or "",
+        "color": v.get("color") or "",
+        "deal":  dlr.get("name") or "",
+        "city":  dlr.get("city") or "",
+        "zip":   dlr.get("postalCode") or "",
+        "reg":   "",
+        "phone": dlr.get("phone") or "",
+        "url":   SOURCES["NL"]["detail"].format(id=v["id"]),
+    }
+
+
+def slim(v, code):
+    return slim_nl(v) if SOURCES[code]["kind"] == "louwman" else slim_tme(v, code)
+
+
+def key_of(c):
+    """Clef d'etat : les ids ne sont uniques qu'au sein d'une plateforme."""
+    return f"{c['cc']}:{c['id']}"
 
 
 # ---------------------------------------------------------------- etat
@@ -165,7 +270,18 @@ def load_state():
     if not os.path.exists(STATE_PATH):
         return None
     with open(STATE_PATH, encoding="utf-8") as f:
-        return json.load(f)
+        state = json.load(f)
+    # Migration v1 -> v2 : les clefs etaient des UUID francais nus.
+    if state.get("version", 1) < 2:
+        state["cars"] = {("FR:" + k if ":" not in k else k): v
+                         for k, v in state["cars"].items()}
+        for rec in state["cars"].values():
+            d = rec.get("d")
+            if d is not None:
+                d.setdefault("cc", "FR")
+        state["version"] = 2
+        print("etat migre en v2 (clefs prefixees par le pays)")
+    return state
 
 
 def save_state(state):
@@ -202,6 +318,10 @@ def km_fmt(n):
     return f"{round(n):,}".replace(",", " ") + " km" if n is not None else "? km"
 
 
+def flag(c):
+    return SOURCES.get(c.get("cc", "FR"), {}).get("flag", "")
+
+
 def is_loud(car):
     if car["price"] is None or car["price"] >= ALERT_PRICE:
         return False
@@ -215,7 +335,7 @@ def notify_new(cars):
     quiet = [c for c in cars if not is_loud(c)]
 
     for c in sorted(loud, key=lambda x: x["price"])[:MAX_LOUD]:
-        push(f"{eur(c['price'])} - {c['model']} {c['year']}",
+        push(f"{flag(c)} {eur(c['price'])} - {c['model']} {c['year']}",
              f"{c['vers']}\n{km_fmt(c['km'])} - {c['city']} ({c['zip']})\n{c['deal']}",
              url=c["url"], priority=5, tags=["rotating_light", "car"])
     if len(loud) > MAX_LOUD:
@@ -224,8 +344,9 @@ def notify_new(cars):
 
     if quiet:
         cheapest = min(quiet, key=lambda c: c["price"] if c["price"] is not None else 10**9)
-        push(f"{len(quiet)} nouvelle(s) annonce(s)",
-             f"La moins chere : {eur(cheapest['price'])} - {cheapest['model']} "
+        pays = " ".join(sorted({flag(c) for c in quiet}))
+        push(f"{len(quiet)} nouvelle(s) annonce(s) {pays}",
+             f"La moins chere : {flag(cheapest)} {eur(cheapest['price'])} - {cheapest['model']} "
              f"{cheapest['year']}, {km_fmt(cheapest['km'])}, {cheapest['city']}",
              url=pages_url(), priority=1, tags=["car"])
 
@@ -234,7 +355,7 @@ def notify_drops(drops):
     for c, old in sorted(drops, key=lambda x: x[0]["price"])[:MAX_LOUD]:
         delta = old - c["price"]
         crossed = old >= ALERT_PRICE > c["price"]
-        push(f"-{eur(delta)} : {c['model']} {c['year']} a {eur(c['price'])}",
+        push(f"{flag(c)} -{eur(delta)} : {c['model']} {c['year']} a {eur(c['price'])}",
              f"Ancien prix {eur(old)}\n{km_fmt(c['km'])} - {c['city']}\n{c['deal']}",
              url=c["url"],
              priority=5 if (crossed or is_loud(c)) else 3,
@@ -262,7 +383,12 @@ def active_cars(state):
     for cid, rec in state["cars"].items():
         if rec.get("gone_since") or not rec.get("d"):
             continue
-        out.append({**rec["d"], "id": cid,
+        d = dict(rec["d"])
+        # "Toyota C-HR" cote Toyota Europe, "Toyota Auris" cote Louwman,
+        # "Corolla" nu ailleurs : sans normalisation le filtre modele compte
+        # la meme voiture sous deux libelles.
+        d["model"] = (d.get("model") or "").removeprefix("Toyota ").strip()
+        out.append({**d, "id": cid.split(":", 1)[-1],
                     "seeded": bool(rec.get("seeded")),
                     "first": (rec.get("first_seen") or "")[:10],
                     "min": rec.get("min_price"),
@@ -271,7 +397,7 @@ def active_cars(state):
 
 
 def write_csv(cars):
-    cols = ["price", "model", "vers", "year", "km", "fuel", "gear", "body",
+    cols = ["cc", "price", "model", "vers", "year", "km", "fuel", "gear", "body",
             "color", "deal", "city", "zip", "reg", "url", "id"]
     with open(CSV_PATH, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
@@ -288,6 +414,7 @@ def write_html(payload, state):
     with open(JSON_PATH, "w", encoding="utf-8") as f:
         json.dump({"updated": state["last_run"],
                    "alert": ALERT_PRICE,
+                   "countries": {k: v["flag"] for k, v in SOURCES.items() if k in COUNTRIES},
                    "cars": payload}, f, ensure_ascii=False, separators=(",", ":"))
 
     tpl = open(os.path.join(ROOT, "scripts", "template.html"), encoding="utf-8").read()
@@ -315,23 +442,29 @@ def main():
     # elargi la liste des modeles, sinon tout le nouveau parc part en alerte.
     seed_new = "--seed" in sys.argv
     mode = "quick" if "--quick" in sys.argv else "full"
-    raw, total = fetch(*( (QUICK_PAGES, ("cashAsc",)) if mode == "quick"
-                          else (None, ("cashAsc", "cashDesc")) ))
-    cars = [slim(v) for v in raw]
-    by_id = {c["id"]: c for c in cars}
 
     state = load_state()
     seeding = state is None
-    if seeding and mode == "quick":
-        print("Aucun etat : le mode quick exige un amorcage complet d'abord.")
-        raw, total = fetch(None, ("cashAsc", "cashDesc"))
-        cars = [slim(v) for v in raw]
-        by_id = {c["id"]: c for c in cars}
-        mode = "full"
-    print(f"mode : {mode}")
     if seeding:
-        state = {"version": 1, "last_run": None, "cars": {}}
+        mode = "full"
+        state = {"version": 2, "last_run": None, "cars": {}}
         print("PREMIER RUN : amorcage silencieux, aucune notification.")
+    print(f"mode : {mode} | pays : {', '.join(COUNTRIES)}")
+
+    # Un pays en echec ne doit ni faire tomber le run, ni faire passer ses
+    # vehicules pour retires : on note ceux effectivement balayes.
+    cars, totals, swept = [], {}, set()
+    for code in COUNTRIES:
+        try:
+            raw, total = fetch(code, None if mode == "full" else QUICK_PAGES,
+                               both=(mode == "full"))
+        except Exception as e:
+            print(f"  {code} : ECHEC, ignore ce passage ({e})", file=sys.stderr)
+            continue
+        cars += [slim(v, code) for v in raw]
+        totals[code] = total
+        swept.add(code)
+    by_id = {key_of(c): c for c in cars}
 
     known = state["cars"]
     new_cars, drops = [], []
@@ -382,6 +515,8 @@ def main():
                 rec.pop("gone_since", None)
                 rec.pop("missed", None)
                 continue
+            if cid.split(":", 1)[0] not in swept:
+                continue          # pays non balaye ce passage : on ne sait pas
             rec["missed"] = rec.get("missed", 0) + 1
             if rec["missed"] >= 2:
                 rec["gone_since"] = rec.get("gone_since") or ts
@@ -391,7 +526,8 @@ def main():
 
     state["last_run"] = ts
     print(f"nouvelles : {len(new_cars)} | baisses : {len(drops)} | "
-          f"disparues (cumul) : {len(gone)} | vus : {len(cars)} | api_total : {total}")
+          f"disparues (cumul) : {len(gone)} | vus : {len(cars)} | "
+          f"api_total : {sum(totals.values())}")
 
     if new_cars:
         notify_new(new_cars)

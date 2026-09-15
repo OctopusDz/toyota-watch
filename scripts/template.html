@@ -81,15 +81,16 @@ footer{text-align:center;color:var(--dim);font-size:11px;padding:0 20px 30px}
 <header>
   <div class="titlerow">
     <div>
-      <h1>Toyota &amp; Lexus hybrides</h1>
+      <h1>Toyota &amp; Lexus hybrides · 5 pays</h1>
       <div class="sub" id="sub">Chargement…</div>
     </div>
     <button id="refresh" aria-label="Actualiser"><span id="ricon">↻</span> Actualiser</button>
   </div>
   <div class="controls">
     <input class="wide" type="search" id="q" placeholder="Rechercher (modèle, ville, concession…)">
+    <select id="country"></select>
     <select id="model"></select>
-    <select id="region"></select>
+    <select class="wide" id="region"></select>
     <select id="maxp">
       <option value="">Prix max</option>
       <option>16000</option><option>18000</option><option>20000</option>
@@ -118,7 +119,7 @@ footer{text-align:center;color:var(--dim);font-size:11px;padding:0 20px 30px}
 <footer id="foot"></footer>
 
 <script>
-let DATA = [], UPDATED = "", ALERT = 20000;
+let DATA = [], UPDATED = "", ALERT = 20000, FLAGS = {};
 
 const $ = s => document.querySelector(s);
 const nb = n => n == null ? "?" : Math.round(n).toLocaleString("fr-FR");
@@ -136,9 +137,15 @@ function fillSelect(el, label, values){
   if (values.includes(keep)) el.value = keep;
 }
 function fillAll(){
+  const cnt = {};
+  DATA.forEach(c => cnt[c.cc] = (cnt[c.cc] || 0) + 1);
+  const cc = $("#country"), keepCc = cc.value;
+  cc.innerHTML = `<option value="">Tous les pays (${nb(DATA.length)})</option>` +
+    Object.keys(FLAGS).map(k => `<option value="${k}">${FLAGS[k]} ${k} (${nb(cnt[k] || 0)})</option>`).join("");
+  if (keepCc in FLAGS) cc.value = keepCc;
   fillSelect($("#model"), "Tous les modèles",
     [...new Set(DATA.map(c => c.model))].filter(Boolean).sort());
-  fillSelect($("#region"), "Toute la France",
+  fillSelect($("#region"), "Toutes les régions",
     [...new Set(DATA.map(c => c.reg))].filter(Boolean).sort());
   const annees = [...new Set(DATA.map(c => c.year))].filter(Boolean).sort().reverse();
   fillSelect($("#minyear"), "Année min", annees);
@@ -147,20 +154,21 @@ function fillAll(){
 
 function render(){
   const q = $("#q").value.trim().toLowerCase();
-  const model = $("#model").value, region = $("#region").value;
+  const model = $("#model").value, region = $("#region").value, country = $("#country").value;
   const maxp = +$("#maxp").value || Infinity, maxk = +$("#maxk").value || Infinity;
   const minyear = +$("#minyear").value || 0;
   const maxyear = +$("#maxyear").value || 9999;
   const sort = $("#sort").value;
 
   let rows = DATA.filter(c =>
+    (!country || c.cc === country) &&
     (!model  || c.model === model) &&
     (!region || c.reg === region) &&
     (c.price ?? Infinity) <= maxp &&
     (c.km ?? Infinity) <= maxk &&
     (+c.year || 0) >= minyear &&
     (+c.year || 9999) <= maxyear &&
-    (!q || `${c.model} ${c.vers} ${c.city} ${c.deal} ${c.reg} ${c.color} ${c.year}`
+    (!q || `${c.cc} ${c.model} ${c.vers} ${c.city} ${c.deal} ${c.reg} ${c.color} ${c.year}`
              .toLowerCase().includes(q)));
 
   const dir = sort[0] === "-" ? -1 : 1, key = sort.replace("-", "");
@@ -179,7 +187,7 @@ function render(){
     const dropped = c.prev && c.price && c.prev > c.price;
     return `<a class="car ${c.price < ALERT ? "deal" : ""}" href="${c.url}" target="_blank" rel="noopener">
       <div class="row1">
-        <div class="name">${c.model} <span style="color:var(--dim);font-weight:400">${c.year || ""}</span></div>
+        <div class="name">${FLAGS[c.cc] || ""} ${c.model} <span style="color:var(--dim);font-weight:400">${c.year || ""}</span></div>
         <div class="price">${eur(c.price)}</div>
       </div>
       ${c.vers ? `<div class="vers">${c.vers}</div>` : ""}
@@ -196,10 +204,10 @@ function render(){
   }).join("") : `<div class="empty">Aucun véhicule ne correspond.</div>`;
 }
 
-["q","model","region","maxp","maxk","minyear","maxyear","sort"].forEach(id =>
+["q","country","model","region","maxp","maxk","minyear","maxyear","sort"].forEach(id =>
   $("#"+id).addEventListener("input", render));
 $("#reset").addEventListener("click", () => {
-  ["q","model","region","maxp","maxk","minyear","maxyear"].forEach(id => $("#"+id).value = "");
+  ["q","country","model","region","maxp","maxk","minyear","maxyear"].forEach(id => $("#"+id).value = "");
   $("#sort").value = "price"; render();
 });
 
@@ -229,7 +237,7 @@ async function load(force){
     const j = await r.json();
     const before = new Set(DATA.map(c => c.id));
     const prevPrices = new Map(DATA.map(c => [c.id, c.price]));
-    DATA = j.cars; UPDATED = j.updated; ALERT = j.alert;
+    DATA = j.cars; UPDATED = j.updated; ALERT = j.alert; FLAGS = j.countries || {FR: "\u{1F1EB}\u{1F1F7}"};
     fillAll();
     render();
 

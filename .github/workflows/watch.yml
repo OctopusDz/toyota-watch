@@ -2,9 +2,9 @@ name: Surveillance Toyota occasions
 
 on:
   schedule:
-    # Toutes les 15 min : balayage rapide des 500 moins cheres (5 requetes).
+    # Toutes les 15 min : les 1 000 moins cheres de chaque pays (~45 requetes).
     - cron: '*/15 * * * *'
-    # Toutes les 6 h : balayage complet, page web, baisses de prix (28 requetes).
+    # Toutes les 6 h : balayage complet des 5 pays, deux tris (~260 requetes).
     - cron: '7 */6 * * *'
   workflow_dispatch:
     inputs:
@@ -26,6 +26,7 @@ permissions:
 jobs:
   watch:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Publie Pages dans le meme job : un push signe GITHUB_TOKEN ne declenche
     # aucun autre workflow (garde-fou anti-boucle de GitHub), donc le
     # workflow Pages separe ne partait que sur un push humain et la page
@@ -60,6 +61,7 @@ jobs:
           ALERT_PRICE:   ${{ vars.ALERT_PRICE   || '20000' }}
           ALERT_REGIONS: ${{ vars.ALERT_REGIONS || '' }}
           QUICK_PAGES:   ${{ vars.QUICK_PAGES   || '10' }}
+          COUNTRIES:     ${{ vars.COUNTRIES      || '' }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           if [ "${{ steps.mode.outputs.mode }}" = "quick" ]; then

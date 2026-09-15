@@ -1,7 +1,8 @@
-# Surveillance Toyota / Lexus hybrides d'occasion
+# Surveillance Toyota / Lexus hybrides d'occasion -- 5 pays
 
-Surveille le stock d'occasions hybrides de toyota.fr, notifie l'iPhone a chaque
-nouvelle annonce ou baisse de prix, et publie une interface mobile sur GitHub Pages.
+Surveille le stock d'occasions hybrides Toyota en France, Belgique, Allemagne,
+Espagne et Pays-Bas, notifie l'iPhone a chaque nouvelle annonce ou baisse de
+prix, et publie une interface mobile sur GitHub Pages avec un filtre par pays.
 
 Objectif : reperer et appeler vite sur les annonces les moins cheres.
 
@@ -9,13 +10,51 @@ Objectif : reperer et appeler vite sur les annonces les moins cheres.
 
 | | |
 |---|---|
-| Toutes les 15 min | balayage des 1 000 moins cheres (10 requetes) -> alerte rapide, page regeneree |
-| Toutes les 6 h | balayage complet en cashAsc + cashDesc (2 x ~50 requetes) -> page web, baisses de prix, annonces disparues |
+| Toutes les 15 min | les 1 000 moins cheres de chaque pays (~45 requetes) -> alerte rapide, page regeneree |
+| Toutes les 6 h | balayage complet des 5 pays, deux tris chacun (~260 requetes) -> baisses de prix, annonces retirees |
 | Notification | ntfy : un tap ouvre directement l'annonce |
 | Interface | `https://<user>.github.io/<repo>/` — recherche, filtres modele / region / prix max / km max / annee min et max, 5 tris |
 
 Alerte sonore (priorite max) sous le seuil de prix ; au-dessus, une seule
 notification silencieuse groupee. Tout reste visible sur la page web.
+
+## Les cinq pays
+
+| | Plateforme | Filtre | URL de fiche |
+|---|---|---|---|
+| FR | Toyota Europe, `fr/fr`, distributeur 94102 | 18 modeles, hybride | `toyota.fr/occasions/voiture/{id}` |
+| BE | Toyota Europe, `be/fr`, 94031 | idem | `fr.toyota.be/occasions/pdp.{id}` |
+| DE | Toyota Europe, `de/de`, 94272 | idem **+ 2016-2025 + certifie Toyota** | `toyota.de/gebrauchtwagen/pdp.{id}` |
+| ES | Toyota Europe, `es/es`, 94244 | idem | `toyota.es/coches-segunda-mano/ficha/{id}` |
+| NL | **Louwman**, `occasions.toyota.nl/api/search` | memes modeles en clair, hybride | `occasions.toyota.nl/auto/{id}` |
+
+Les quatre premiers partagent l'API de Toyota Europe : meme corps de requete,
+seuls changent le chemin pays/langue, le `distributorCode` (lu dans le HTML
+de chaque site) et le format d'URL de fiche. `pdp.{id}` et `ficha/{id}` sont
+reecrits en slug canonique par le site lui-meme.
+
+La liste de modeles est celle de la France, appliquee partout ("aligne tout
+sur la France"). L'Allemagne y ajoute les filtres configures sur le site :
+`usedCarYear` en plage `{min, max}` et `usedCarWarranty: ["any"]`, qui est la
+case « Afficher uniquement les vehicules d'occasion certifies Toyota ».
+Contrairement a ce qui etait suppose au depart, l'API accepte bien des plages
+(`usedCarYear`, `usedCarPrice`, `usedCarMileage`) : elles n'apparaissent
+simplement pas dans les agregations.
+
+Les Pays-Bas sont une autre plateforme (Louwman, l'importateur). API .NET :
+`POST /api/search?source=toyota`, corps `{filter:[{name, values}],
+limits:{start, limit}, sort}`, resultats sous `occasions`. Le serveur
+dedoublonne apres decoupage -- une page de 100 en rend ~80 et `count` est
+gonfle d'autant -- d'ou une avancee par `limit` et un arret sur page vide.
+Elle offre un vrai `updatedDate` et un tri `RecentDesc`, mais on garde le diff
+d'etat pour rester homogene.
+
+Les ids ne sont uniques qu'au sein d'une plateforme : l'etat est indexe par
+`PAYS:id`. La migration depuis l'ancien format (UUID nus) est automatique.
+
+Pour ajouter un pays : une entree dans `SOURCES`, puis **obligatoirement**
+`python3 scripts/watch.py --seed` avant de pousser, sinon tout son parc part
+en notification d'un coup.
 
 ## Pourquoi une comparaison d'etat plutot qu'un tri par date
 
@@ -80,7 +119,8 @@ Repo → *Settings* → *Secrets and variables* → *Actions* → onglet **Varia
 |---|---|---|
 | `ALERT_PRICE` | `20000` | seuil de l'alerte sonore (EUR) |
 | `ALERT_REGIONS` | vide | limite l'alerte sonore a certaines regions, ex. `bretagne,pays-de-la-loire` (la page reste nationale) |
-| `QUICK_PAGES` | `10` | pages balayees en mode rapide (10 = 1 000 moins cheres). A garder assez large pour couvrir `ALERT_PRICE` avec de la marge : la 1 000e voiture est a ~22 500 EUR, soit 2 500 EUR au-dessus du seuil. |
+| `QUICK_PAGES` | `10` | pages balayees en mode rapide, par pays (10 = 1 000 moins cheres). A garder assez large pour couvrir `ALERT_PRICE` avec de la marge. |
+| `COUNTRIES` | vide = tous | ex. `FR,BE` pour restreindre la surveillance. |
 | `NTFY_SERVER` | `https://ntfy.sh` | serveur ntfy auto-heberge le cas echeant |
 
 Reperes sur le parc actuel (4 991 vehicules) : 360 sous 20 000 EUR (7 %), la
