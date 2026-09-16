@@ -15,8 +15,10 @@ Objectif : reperer et appeler vite sur les annonces les moins cheres.
 | Notification | ntfy : un tap ouvre directement l'annonce |
 | Interface | `https://<user>.github.io/<repo>/` — recherche, filtres modele / region / prix max / km max / annee min et max, 5 tris |
 
-Alerte sonore (priorite max) sous le seuil de prix ; au-dessus, une seule
-notification silencieuse groupee. Tout reste visible sur la page web.
+Notification (priorite max, son) uniquement sous le seuil de prix -- nouvelle
+annonce, ou baisse dont le nouveau prix passe sous le seuil. **Au-dessus :
+rien du tout**, pas meme une notification silencieuse (iOS l'affiche quand
+meme). Tout reste visible sur la page web.
 
 ## Les cinq pays
 
@@ -117,7 +119,7 @@ Repo → *Settings* → *Secrets and variables* → *Actions* → onglet **Varia
 
 | Variable | Defaut | Role |
 |---|---|---|
-| `ALERT_PRICE` | `20000` | seuil de l'alerte sonore (EUR) |
+| `ALERT_PRICE` | `20000` (regle a 15000) | seuil en dessous duquel on notifie (EUR). Rien n'est envoye au-dessus. |
 | `ALERT_REGIONS` | vide | limite l'alerte sonore a certaines regions, ex. `bretagne,pays-de-la-loire` (la page reste nationale) |
 | `QUICK_PAGES` | `10` | pages balayees en mode rapide, par pays (10 = 1 000 moins cheres). A garder assez large pour couvrir `ALERT_PRICE` avec de la marge. |
 | `COUNTRIES` | vide = tous | ex. `FR,BE` pour restreindre la surveillance. |

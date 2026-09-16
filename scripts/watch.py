@@ -331,35 +331,31 @@ def is_loud(car):
 
 
 def notify_new(cars):
-    loud = [c for c in cars if is_loud(c)]
-    quiet = [c for c in cars if not is_loud(c)]
-
-    for c in sorted(loud, key=lambda x: x["price"])[:MAX_LOUD]:
+    """Uniquement les vehicules sous le seuil. Au-dessus : rien, pas meme une
+    notification groupee -- sur iOS ntfy l'affiche quand meme, sans son, et
+    c'etait percu comme une alerte de trop."""
+    loud = sorted((c for c in cars if is_loud(c)), key=lambda x: x["price"])
+    for c in loud[:MAX_LOUD]:
         push(f"{flag(c)} {eur(c['price'])} - {c['model']} {c['year']}",
              f"{c['vers']}\n{km_fmt(c['km'])} - {c['city']} ({c['zip']})\n{c['deal']}",
              url=c["url"], priority=5, tags=["rotating_light", "car"])
     if len(loud) > MAX_LOUD:
         push(f"+{len(loud) - MAX_LOUD} autres sous {eur(ALERT_PRICE)}",
              "Voir la liste complete", url=pages_url(), priority=4, tags=["car"])
-
-    if quiet:
-        cheapest = min(quiet, key=lambda c: c["price"] if c["price"] is not None else 10**9)
-        pays = " ".join(sorted({flag(c) for c in quiet}))
-        push(f"{len(quiet)} nouvelle(s) annonce(s) {pays}",
-             f"La moins chere : {flag(cheapest)} {eur(cheapest['price'])} - {cheapest['model']} "
-             f"{cheapest['year']}, {km_fmt(cheapest['km'])}, {cheapest['city']}",
-             url=pages_url(), priority=1, tags=["car"])
+    if len(cars) - len(loud):
+        print(f"  {len(cars) - len(loud)} nouveaute(s) au-dessus du seuil : non notifiees")
 
 
 def notify_drops(drops):
-    for c, old in sorted(drops, key=lambda x: x[0]["price"])[:MAX_LOUD]:
-        delta = old - c["price"]
-        crossed = old >= ALERT_PRICE > c["price"]
-        push(f"{flag(c)} -{eur(delta)} : {c['model']} {c['year']} a {eur(c['price'])}",
+    """Une baisse ne vaut alerte que si le nouveau prix est sous le seuil --
+    y compris quand c'est la baisse qui l'y fait entrer."""
+    hot = [(c, old) for c, old in drops if is_loud(c)]
+    for c, old in sorted(hot, key=lambda x: x[0]["price"])[:MAX_LOUD]:
+        push(f"{flag(c)} -{eur(old - c['price'])} : {c['model']} {c['year']} a {eur(c['price'])}",
              f"Ancien prix {eur(old)}\n{km_fmt(c['km'])} - {c['city']}\n{c['deal']}",
-             url=c["url"],
-             priority=5 if (crossed or is_loud(c)) else 3,
-             tags=["chart_with_downwards_trend", "car"])
+             url=c["url"], priority=5, tags=["chart_with_downwards_trend", "car"])
+    if len(drops) - len(hot):
+        print(f"  {len(drops) - len(hot)} baisse(s) au-dessus du seuil : non notifiees")
 
 
 def pages_url():
