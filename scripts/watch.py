@@ -20,7 +20,7 @@ Sorties :
   notifications ntfy pour les nouveautes et les baisses de prix
 """
 
-import json, os, csv, sys, time, html, urllib.request, urllib.error
+import json, os, csv, sys, time, html, re, unicodedata, urllib.request, urllib.error, urllib.parse
 from datetime import datetime, timezone
 
 ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -45,7 +45,7 @@ SOURCES = {
            "detail": "https://www.toyota.fr/occasions/voiture/{id}"},
     "BE": {"kind": "tme", "flag": "\U0001F1E7\U0001F1EA", "cc": "be", "lang": "fr",
            "dist": "94031", "brands": ["38", "22"], "extra": [],
-           "detail": "https://fr.toyota.be/occasions/pdp.{id}"},
+           "detail": "https://fr.toyota.be/occasions/pdp", "slug": True},
     "DE": {"kind": "tme", "flag": "\U0001F1E9\U0001F1EA", "cc": "de", "lang": "de",
            "dist": "94272", "brands": ["38", "22"],
            # Filtres propres a l'Allemagne, tels que configures sur le site :
@@ -53,7 +53,7 @@ SOURCES = {
            # case "Afficher uniquement les vehicules d'occasion certifies").
            "extra": [{"filterId": "usedCarYear", "min": 2016, "max": 2025},
                      {"filterId": "usedCarWarranty", "valueIds": ["any"]}],
-           "detail": "https://www.toyota.de/gebrauchtwagen/pdp.{id}"},
+           "detail": "https://www.toyota.de/gebrauchtwagen/pdp", "slug": True},
     "ES": {"kind": "tme", "flag": "\U0001F1EA\U0001F1F8", "cc": "es", "lang": "es",
            "dist": "94244", "brands": ["38", "22"], "extra": [],
            "detail": "https://www.toyota.es/coches-segunda-mano/ficha/{id}"},
@@ -205,6 +205,43 @@ def _num(x):
     return int(f) if f.is_integer() else f
 
 
+def _slug_part(e):
+    """Transcription fidele de getUscUrl : NFD, retrait de "N/A", des accents
+    et des parentheses ; espaces, virgules, slash -> "-" ; "+" -> "plus" ;
+    points retires."""
+    e = unicodedata.normalize("NFD", e).replace("N/A", "")
+    e = "".join(ch for ch in e if not (0x300 <= ord(ch) <= 0x36F))
+    e = re.sub(r"[()]", "", e)
+    e = re.sub(r"[\s,/]+", "-", e)
+    return e.replace("+", "plus").replace(".", "")
+
+
+def detail_url_tme(v, code):
+    """URL de fiche.
+
+    FR et ES acceptent /{id} et redirigent cote serveur vers le slug
+    canonique : fiable. BE et DE n'ont pas cette redirection, et pdp.{id}
+    y est instable (la meme URL rend 404 puis 200 a une minute d'ecart) :
+    on reconstruit le slug exactement comme le composant du site, a partir
+    de marque, modele, annee de 1re immatriculation, carrosserie, boite,
+    carburant marketing et id. Verifie 6/6 en Allemagne.
+    """
+    src = SOURCES[code]
+    if not src.get("slug"):
+        return src["detail"].format(id=v["id"])
+    p = v.get("product") or {}
+    manu  = (p.get("brand") or {}).get("description") or ""
+    model = (p.get("model") or {}).get("description") or ""
+    reg   = (v.get("history") or {}).get("registrationDate") or ""
+    parts = ["" if model.lower().startswith(manu.lower()) else manu,
+             model, reg[:4], p.get("bodyType") or "",
+             ((p.get("transmission") or {}).get("transmissionType") or {}).get("description") or "",
+             ((p.get("engine") or {}).get("marketingFuelType") or {}).get("description") or "",
+             v["id"]]
+    slug = re.sub(r"-+", "-", "-".join(_slug_part(x) for x in parts if x)).lower()
+    return f"{src['detail']}.{urllib.parse.quote(slug, safe='-')}"
+
+
 def slim_tme(v, code):
     """Ne garde que ce qui sert a l'affichage et aux alertes."""
     p   = v.get("product") or {}
@@ -228,7 +265,7 @@ def slim_tme(v, code):
         "zip":   adr.get("zip") or "",
         "reg":   adr.get("region") or "",
         "phone": dlr.get("primaryPhone") or dlr.get("phone") or "",
-        "url":   SOURCES[code]["detail"].format(id=v["id"]),
+        "url":   detail_url_tme(v, code),
     }
 
 

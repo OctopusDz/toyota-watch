@@ -25,15 +25,27 @@ meme). Tout reste visible sur la page web.
 | | Plateforme | Filtre | URL de fiche |
 |---|---|---|---|
 | FR | Toyota Europe, `fr/fr`, distributeur 94102 | 18 modeles, hybride | `toyota.fr/occasions/voiture/{id}` |
-| BE | Toyota Europe, `be/fr`, 94031 | idem | `fr.toyota.be/occasions/pdp.{id}` |
-| DE | Toyota Europe, `de/de`, 94272 | idem **+ 2016-2025 + certifie Toyota** | `toyota.de/gebrauchtwagen/pdp.{id}` |
+| BE | Toyota Europe, `be/fr`, 94031 | idem | `fr.toyota.be/occasions/pdp.{slug}-{id}` |
+| DE | Toyota Europe, `de/de`, 94272 | idem **+ 2016-2025 + certifie Toyota** | `toyota.de/gebrauchtwagen/pdp.{slug}-{id}` |
 | ES | Toyota Europe, `es/es`, 94244 | idem | `toyota.es/coches-segunda-mano/ficha/{id}` |
 | NL | **Louwman**, `occasions.toyota.nl/api/search` | memes modeles en clair, hybride | `occasions.toyota.nl/auto/{id}` |
 
 Les quatre premiers partagent l'API de Toyota Europe : meme corps de requete,
 seuls changent le chemin pays/langue, le `distributorCode` (lu dans le HTML
-de chaque site) et le format d'URL de fiche. `pdp.{id}` et `ficha/{id}` sont
-reecrits en slug canonique par le site lui-meme.
+de chaque site) et le format d'URL de fiche.
+
+**URL de fiche.** FR et ES acceptent `/{id}` et redirigent cote serveur vers
+le slug canonique : fiable. BE et DE n'ont pas cette redirection, et
+`pdp.{id}` y est instable -- la meme URL rend 404 puis 200 a une minute
+d'ecart. Pour ces deux pays le slug est reconstruit exactement comme le fait
+le composant du site (`getUscUrl`) : marque (omise si le modele la contient
+deja), modele, annee de 1re immatriculation, carrosserie, type de boite,
+carburant marketing, id ; NFD, accents et parentheses retires, espaces ->
+`-`, `+` -> `plus`, points retires. Verifie identique aux liens du site.
+
+Le site belge n'ouvre pas certaines de ses propres fiches (redirection vers
+la liste, quel que soit le format d'URL) : c'est un defaut de toyota.be, pas
+du lien genere.
 
 La liste de modeles est celle de la France, appliquee partout ("aligne tout
 sur la France"). L'Allemagne y ajoute les filtres configures sur le site :
