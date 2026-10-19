@@ -179,8 +179,17 @@ d'etre envoyees.
   donnees sont donc dans `docs/cars.json`, recharge avec un parametre anti-cache
   a chaque ouverture, au retour sur l'app (`visibilitychange`) et via le bouton
   « actualiser ». La page ne peut pas afficher un stock perime.
-- **Pages est deploye depuis le workflow de surveillance, pas par un workflow
-  separe.** Un push signe `GITHUB_TOKEN` ne declenche aucun autre workflow
+- **Pages est deploye par un job separe du meme workflow.** Le job de
+  surveillance ne declare aucun environnement : GitHub serialise les
+  deploiements d'un meme environnement, et un deploiement Pages reste en
+  cours indefiniment (vu le 05/10/2026) bloque toute la file -- les passages
+  suivants attendent puis sont annules avant d'avoir demarre. Resultat :
+  quatorze jours sans collecte et sans aucune notification, alors que le cron
+  tournait et que les workflows etaient actifs. Debloquer demande de fermer
+  le deploiement zombie a la main :
+  `gh api -X POST repos/<owner>/<repo>/deployments/<id>/statuses -f state=failure`.
+  La collecte et les alertes sont desormais isolees de la publication.
+- **Un push signe GITHUB_TOKEN ne declenche aucun autre workflow.** Un push signe `GITHUB_TOKEN` ne declenche aucun autre workflow
   (garde-fou anti-boucle de GitHub) : un `pages.yml` declenche sur `push` ne
   partait donc que sur un push humain, et la page publiee restait figee entre
   deux interventions manuelles pendant que le robot collectait correctement.

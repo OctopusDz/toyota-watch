@@ -24,16 +24,15 @@ permissions:
   id-token: write
 
 jobs:
+  # Le job de surveillance ne declare AUCUN environnement : GitHub serialise
+  # les deploiements d'un meme environnement, et un deploiement Pages reste
+  # en cours indefiniment (vu le 05/10/2026) bloque alors toute la file. Les
+  # passages suivants attendent puis sont annules avant d'avoir demarre : plus
+  # aucune collecte, plus aucune notification, pendant quatorze jours.
+  # La collecte et les alertes doivent survivre a une panne de publication.
   watch:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Publie Pages dans le meme job : un push signe GITHUB_TOKEN ne declenche
-    # aucun autre workflow (garde-fou anti-boucle de GitHub), donc le
-    # workflow Pages separe ne partait que sur un push humain et la page
-    # restait figee entre deux interventions manuelles.
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -98,9 +97,28 @@ jobs:
           done
           fi
 
-      - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs
+
+  # Publication isolee : elle peut echouer ou trainer sans empecher le
+  # prochain passage de collecter et de notifier.
+  pages:
+    needs: watch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # Un deploiement plus recent remplace celui qui attend, au lieu de
+    # s'empiler derriere lui.
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: true
+    steps:
+      - uses: actions/configure-pages@v5
+        with:
+          # Active Pages au premier passage, sans intervention manuelle.
+          enablement: true
       - id: deployment
         uses: actions/deploy-pages@v4
