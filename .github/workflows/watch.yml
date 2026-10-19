@@ -14,8 +14,12 @@ on:
         options: [full, quick]
         default: full
 
+# Groupe renomme le 19/10/2026 : l'ancien verrou "watch" avait fuite apres
+# l'annulation d'un run qui attendait l'environnement github-pages, et plus
+# aucun passage ne demarrait (statut pending, zero job). Renommer le groupe
+# est le seul moyen de repartir sur un verrou neuf.
 concurrency:
-  group: watch
+  group: watch-v2
   cancel-in-progress: false
 
 permissions:
